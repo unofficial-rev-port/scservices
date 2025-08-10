@@ -14,6 +14,8 @@ struct ServoNtState {
 
     void Initialize(const nt::NetworkTableInstance& instance, int servoNum,
                     const std::string& busIdStr, nt::PubSubOptions options);
+    
+    void Initialize(const nt::NetworkTableInstance& instance, int busId, int moduleAddress, int servoNum);
 };
 
 }

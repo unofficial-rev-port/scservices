@@ -12,6 +12,9 @@ add_executable(ExpansionHubDaemon
     ExpansionHubNtState.cpp
     ExpansionHubSerial.cpp
     SystemDUsbMonitor.cpp
+    I2CNtState.cpp
+    LynxModuleNtState.cpp
+    LynxUsbDevice.cpp
 )
 target_compile_features(ExpansionHubDaemon PRIVATE cxx_std_20)
 target_compile_features(ExpansionHubDaemon PRIVATE c_std_17)

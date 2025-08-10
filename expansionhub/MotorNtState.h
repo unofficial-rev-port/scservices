@@ -33,6 +33,8 @@ struct MotorNtState {
 
     void Initialize(const nt::NetworkTableInstance& instance, int motorNum,
                     const std::string& busIdStr, nt::PubSubOptions options);
+    
+    void Initialize(const nt::NetworkTableInstance& instance, int busId, int moduleAddress, int motorNum);
 
     double lastEncoderPosition{0};
     double lastEncoderVelocity{0};

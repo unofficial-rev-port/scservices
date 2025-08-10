@@ -106,3 +106,28 @@ void MotorNtState::Initialize(const nt::NetworkTableInstance& instance,
     positionPid.Initialize(instance, motorNumStr, busIdStr, "position",
                            options);
 }
+
+void MotorNtState::Initialize(const nt::NetworkTableInstance& instance, int busId, int moduleAddress, int motorNum) {
+    nt::PubSubOptions options;
+    options.pollStorage = 10;
+    options.periodic = 0.0;
+    
+    std::string basePath = "/ExpansionHub/" + std::to_string(busId) + "/Module_" + std::to_string(moduleAddress) + "/Motor_" + std::to_string(motorNum);
+    
+    encoderPublisher = instance.GetDoubleTopic(basePath + "/encoder").Publish(options);
+    velocityPublisher = instance.GetDoubleTopic(basePath + "/encoderVelocity").Publish(options);
+    currentPublisher = instance.GetDoubleTopic(basePath + "/current").Publish(options);
+    
+    setpointSubscriber = instance.GetDoubleTopic(basePath + "/setpoint").Subscribe(0, options);
+    floatOn0Subscriber = instance.GetBooleanTopic(basePath + "/floatOn0").Subscribe(false, options);
+    enabledSubscriber = instance.GetBooleanTopic(basePath + "/enabled").Subscribe(false, options);
+    modeSubscriber = instance.GetIntegerTopic(basePath + "/mode").Subscribe(0, options);
+    reversedSubscriber = instance.GetBooleanTopic(basePath + "/reversed").Subscribe(false, options);
+    distancePerCountSubscriber = instance.GetDoubleTopic(basePath + "/distancePerCount").Subscribe(0, options);
+    resetEncoderSubscriber = instance.GetBooleanTopic(basePath + "/resetEncoder").Subscribe(false, options);
+    
+    auto motorNumStr = std::to_string(motorNum);
+    auto busIdStr = std::to_string(busId);
+    velocityPid.Initialize(instance, motorNumStr, busIdStr, "velocity", options);
+    positionPid.Initialize(instance, motorNumStr, busIdStr, "position", options);
+}
