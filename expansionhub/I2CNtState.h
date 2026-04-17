@@ -14,17 +14,17 @@ namespace eh {
 
 struct I2CChannelState {
     // Configuration
-    CachedCommandSubscriber<uint8_t> speedCodeSubscriber;
-    
+    CachedCommand<nt::IntegerSubscriber> speedCodeSubscriber;
+
     // Status
     nt::IntegerPublisher statusPublisher;
     nt::RawPublisher dataPublisher;
-    
+
     // Block read configuration
-    CachedCommandSubscriber<uint8_t> blockReadAddressSubscriber;
-    CachedCommandSubscriber<uint8_t> blockReadRegisterSubscriber;
-    CachedCommandSubscriber<uint8_t> blockReadBytesSubscriber;
-    CachedCommandSubscriber<uint8_t> blockReadIntervalSubscriber;
+    CachedCommand<nt::IntegerSubscriber> blockReadAddressSubscriber;
+    CachedCommand<nt::IntegerSubscriber> blockReadRegisterSubscriber;
+    CachedCommand<nt::IntegerSubscriber> blockReadBytesSubscriber;
+    CachedCommand<nt::IntegerSubscriber> blockReadIntervalSubscriber;
     
     uint8_t lastStatus{0};
     std::vector<uint8_t> lastData;

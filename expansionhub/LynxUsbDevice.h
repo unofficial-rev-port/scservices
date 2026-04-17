@@ -9,6 +9,7 @@
 #include <deque>
 #include <map>
 #include <memory>
+#include <set>
 
 namespace eh {
 
@@ -23,10 +24,16 @@ class LynxUsbDevice {
         Error
     };
 
+    enum class SendState {
+        ReadyToSend,
+        WaitingForPackets,
+        WaitingForFinish,
+    };
+
     LynxUsbDevice() = default;
     ~LynxUsbDevice() noexcept;
 
-    bool Initialize(wpi::uv::Loop& loop, int fd, std::string path, int busId);
+    bool Initialize(wpi::uv::Loop& loop, int fd, std::string path, int busId, bool isUart = false);
 
     void SetNtInstance(const nt::NetworkTableInstance* instance) { ntInstance = instance; }
 
@@ -84,7 +91,7 @@ class LynxUsbDevice {
 
     void DoRead();
 
-    void CheckForStateAdvance(uint8_t moduleAddress, MessageNumbers messageNumber, size_t dataSize);
+    void CheckSendStateAdvance();
     void HandlePayload(std::span<const uint8_t> data, uint8_t crc);
 
     LynxUsbDevice(LynxUsbDevice&) = delete;
@@ -106,6 +113,20 @@ class LynxUsbDevice {
     std::deque<size_t> pendingWrites;
     size_t currentCount{0};
 
+    // Diagnostic: per-packet send tracking. Each non-direct SendPacket pushes
+    // here; HandlePayload removes the matching (dest, msgNum) entry on response.
+    // If something stays here long enough to hit Recover, the hub silently
+    // dropped it.
+    struct PendingSend {
+        uint64_t sentAt;
+        uint8_t dest;
+        uint8_t msgNum;
+        uint16_t packetTypeId;
+    };
+    std::deque<PendingSend> pendingSends;
+    uint64_t totalSent{0};
+    uint64_t totalReceived{0};
+
     uint8_t txBuffer[1024];
 
     std::string serialPath;
@@ -114,11 +135,13 @@ class LynxUsbDevice {
     
     DeviceState deviceState{DeviceState::Initializing};
     bool configuredFtdiReset{false};
+    bool isUartConnection{false};
 
+    SendState sendState{SendState::ReadyToSend};
     bool haveBulk{false};
     bool haveBattery{false};
     bool haveModuleStatus{false};
-    
+
     // Discovery tracking
     std::set<uint8_t> discoveredAddresses;
     bool discoveryComplete{false};

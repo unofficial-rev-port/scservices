@@ -2,11 +2,18 @@
 
 #include "stdio.h"
 #include "wpi/timestamp.h"
+#include <algorithm>
 #include <set>
 #include <unistd.h>
 #include <termios.h>
 
-#define MAX_NUM_OUTSTANDING_MESSAGES 8
+// EXPERIMENT 2026-04-16: lowered from 8 to 1 to disambiguate why dest=2
+// silently drops every packet. Combined with DEBUG_ONLY_MODULE_2 in
+// main_enhanced.cpp, this forces a strictly serial "send one, wait for reply"
+// pattern with no first-tick burst. If module 2 still gives no response,
+// the issue is routing (parent doesn't relay unicast post-discovery), not
+// burst-induced confusion. Revert to 8 once root cause is fixed.
+#define MAX_NUM_OUTSTANDING_MESSAGES 1
 
 #define MODULE_STATUS_ID 0x7F03
 #define KEEP_ALIVE_ID 0x7F04
@@ -93,10 +100,11 @@ static constexpr uint8_t CalcChecksum(std::span<const uint8_t> buffer) {
     return sum;
 }
 
-bool LynxUsbDevice::Initialize(wpi::uv::Loop& loop, int fd, std::string path, int busId) {
+bool LynxUsbDevice::Initialize(wpi::uv::Loop& loop, int fd, std::string path, int busId, bool isUart) {
     serialFd = fd;
     serialPath = std::move(path);
     this->busId = busId;
+    this->isUartConnection = isUart;
     tcflush(serialFd, TCIFLUSH);
 
     auto poll = wpi::uv::Poll::Create(loop, serialFd);
@@ -128,25 +136,25 @@ void LynxUsbDevice::OnModuleDiscovered(uint8_t address, uint8_t parentAddress) {
     moduleInfo.isRS485Device = !moduleInfo.isParent;
     moduleInfo.serialPath = serialPath;
     
-    // Determine module type based on address and parent relationship
-    // This is a simple heuristic - in practice you might query the module for its type
-    if (moduleInfo.isParent) {
-        moduleInfo.moduleType = LynxModuleType::EXPANSION_HUB; // or CONTROL_HUB
-    } else {
-        // For chained devices, we'll determine type during interface query
-        moduleInfo.moduleType = LynxModuleType::UNKNOWN;
-    }
+    // Default to EXPANSION_HUB for all discovered modules (parent or chained)
+    // Servo hubs would need to be identified separately
+    moduleInfo.moduleType = LynxModuleType::EXPANSION_HUB;
     
     auto module = std::make_unique<LynxModuleNtState>();
     if (ntInstance) {
         module->Initialize(*ntInstance, busId, moduleInfo);
+        printf("Module NT initialized: bus=%d addr=%d type=%d ntConnected=%d\n",
+               busId, address, static_cast<int>(moduleInfo.moduleType),
+               ntInstance->IsConnected() ? 1 : 0);
+    } else {
+        printf("WARNING: ntInstance is null during module discovery!\n");
     }
-    
+
     size_t moduleIndex = modules.size();
     addressToModuleIndex[address] = moduleIndex;
     modules.push_back(std::move(module));
-    
-    printf("Discovered module at address %d (parent: %d)\\n", address, parentAddress);
+
+    printf("Discovered module at address %d (parent: %d, isParent: %d)\n", address, parentAddress, moduleInfo.isParent ? 1 : 0);
 }
 
 LynxModuleNtState* LynxUsbDevice::GetModule(uint8_t address) {
@@ -160,6 +168,14 @@ LynxModuleNtState* LynxUsbDevice::GetModule(uint8_t address) {
 void LynxUsbDevice::RunDiscoverInternal() {
     auto now = wpi::Now();
     auto delta = now - discoverStartTime;
+
+    // If we've found at least one module, use a shorter timeout (500ms) before proceeding
+    if (discoveryComplete && delta > 500000) {
+        printf("Discovery complete: found %zu module(s)\n", discoveredAddresses.size());
+        deviceState = DeviceState::ConfiguringInterface;
+        discoverStartTime = 0;
+        return;
+    }
 
     if (delta <= MESSAGE_TIMEOUT) {
         return;
@@ -230,12 +246,12 @@ void LynxUsbDevice::RunDiscoverySteps() {
 LynxUsbDevice::~LynxUsbDevice() noexcept {
     auto lock = serialPoll.lock();
     if (lock) {
-        printf("Closing serial poller\\n");
+        printf("Closing serial poller\n");
         lock->Stop();
         lock->Close();
     }
     if (serialFd != -1) {
-        printf("Closed fd\\n");
+        printf("Closed fd\n");
         close(serialFd);
     }
 }
@@ -269,15 +285,29 @@ void LynxUsbDevice::SendPacket(uint8_t destAddr, uint8_t messageNumber, uint16_t
         writeBuffer.insert(writeBuffer.end(), txBufferSpan.begin(),
                            txBufferSpan.end());
         pendingWrites.emplace_back(txBufferSpan.size());
+        pendingSends.push_back(
+            {wpi::Now(), destAddr, messageNumber, packetTypeId});
+        totalSent++;
     }
 }
 
 void LynxUsbDevice::DoRead() {
     ssize_t readVal = read(serialFd, readBuf, sizeof(readBuf));
     if (readVal <= 0) {
-        printf("Read error\\n");
+        printf("Read error\n");
         return;
     }
+
+    static uint64_t readCount = 0;
+    if (readCount % 100 == 0) {
+        printf("DoRead: %zd bytes (call #%lu) state=%d outstanding=%d "
+               "pendingSends=%zu sent=%lu recv=%lu\n",
+               readVal, (unsigned long)readCount,
+               static_cast<int>(deviceState), outstandingMessages,
+               pendingSends.size(),
+               (unsigned long)totalSent, (unsigned long)totalReceived);
+    }
+    readCount++;
 
     stateMachine.HandleBytes(
         std::span<const uint8_t>{readBuf, static_cast<size_t>(readVal)});
@@ -285,17 +315,19 @@ void LynxUsbDevice::DoRead() {
 }
 
 bool LynxUsbDevice::AllowSend() {
-    return deviceState == DeviceState::Ready;
+    return deviceState == DeviceState::Ready && sendState == SendState::ReadyToSend;
 }
 
 void LynxUsbDevice::StartTransaction(bool canDoEnable) {
     writeBuffer.clear();
+    pendingWrites.clear();
     currentCount = 0;
     lastLoop = wpi::Now();
     canEnable = canDoEnable;
     haveBattery = false;
     haveBulk = false;
     haveModuleStatus = false;
+    sendState = SendState::WaitingForPackets;
 }
 
 void LynxUsbDevice::Flush() {
@@ -314,11 +346,19 @@ void LynxUsbDevice::Flush() {
     write(serialFd, writeBuffer.data() + currentCount, count);
     outstandingMessages += toWrite;
     currentCount += count;
+    if (sendState == SendState::WaitingForPackets) {
+        sendState = SendState::WaitingForFinish;
+        printf("Flush: total_pending=%zu first_batch=%zu\n", pendingWrites.size() + toWrite, toWrite);
+    }
 }
 
 void LynxUsbDevice::HandlePayload(std::span<const uint8_t> data, uint8_t crc) {
     if (crc != PacketCrc(data)) {
-        printf("CRC failure, bus will recover\\n");
+        printf("CRC failure, bus will recover\n");
+        if (deviceState == DeviceState::Ready && outstandingMessages > 0) {
+            outstandingMessages--;
+        }
+        CheckSendStateAdvance();
         return;
     }
 
@@ -328,42 +368,80 @@ void LynxUsbDevice::HandlePayload(std::span<const uint8_t> data, uint8_t crc) {
     auto payload = PacketPayloadBuffer(data);
 
     if (PacketIsNack(packetId)) {
-        printf("Nack %d for message id %d from address %d\\n", 
+        if (outstandingMessages > 0) outstandingMessages--;
+        auto it = std::find_if(pendingSends.begin(), pendingSends.end(),
+            [&](const PendingSend& p) {
+                return p.dest == sourceAddress && p.msgNum == packetReferenceNumber;
+            });
+        if (it != pendingSends.end()) {
+            pendingSends.erase(it);
+            totalReceived++;
+        }
+        printf("Nack %d for message id %d from address %d\n",
                payload.empty() ? 0 : payload[0], packetReferenceNumber, sourceAddress);
+        CheckSendStateAdvance();
         return;
     }
 
     if (PacketIsDiscover(packetId)) {
-        if (deviceState == DeviceState::Discovering && payload.size() > 0 && payload[0] == 1) {
-            uint8_t parentAddress = payload.size() > 1 ? payload[1] : 0xFF;
-            OnModuleDiscovered(sourceAddress, parentAddress);
-            
-            // For now, assume discovery is complete after first response
-            // In a full implementation, you'd wait for a timeout or specific condition
-            deviceState = DeviceState::ConfiguringInterface;
-            discoverStartTime = 0;
+        if (deviceState == DeviceState::Discovering && payload.size() > 0) {
+            // payload[0]: 1=parent/has children, 0=leaf/child module
+            // For children, set parent to the first discovered module
+            uint8_t parentAddress;
+            if (payload[0] == 1 || discoveredAddresses.empty()) {
+                parentAddress = 0xFF;  // This is a parent module
+            } else {
+                parentAddress = *discoveredAddresses.begin();  // Child of first parent
+            }
+            if (discoveredAddresses.find(sourceAddress) == discoveredAddresses.end()) {
+                OnModuleDiscovered(sourceAddress, parentAddress);
+            }
+            // After first response, use a shorter timeout to wait for more modules.
+            if (!discoveryComplete) {
+                discoveryComplete = true;
+                discoverStartTime = wpi::Now();
+            }
         }
         return;
-    } else if (PacketIsAck(packetId) && 
+    } else if (PacketIsAck(packetId) &&
                packetReferenceNumber == MESSAGE_FTDI_RESET_CONTROL) {
         configuredFtdiReset = true;
         deviceState = DeviceState::Ready;
         discoverStartTime = 0;
-        printf("Device initialization complete\\n");
+        printf("Device initialization complete\n");
         return;
     } else if (PacketIsQueryInterface(packetId)) {
         if (deviceState == DeviceState::ConfiguringInterface && !packetInterfaceId.has_value()) {
             packetInterfaceId = ReadUint16(payload);
-            deviceState = DeviceState::ConfiguringFtdi;
+            if (isUartConnection) {
+                // No FTDI chip on internal UART — skip straight to Ready
+                deviceState = DeviceState::Ready;
+                printf("UART device initialization complete (no FTDI)\n");
+            } else {
+                deviceState = DeviceState::ConfiguringFtdi;
+            }
             discoverStartTime = 0;
         }
         return;
+    }
+
+    if (outstandingMessages > 0) outstandingMessages--;
+    {
+        auto it = std::find_if(pendingSends.begin(), pendingSends.end(),
+            [&](const PendingSend& p) {
+                return p.dest == sourceAddress && p.msgNum == packetReferenceNumber;
+            });
+        if (it != pendingSends.end()) {
+            pendingSends.erase(it);
+            totalReceived++;
+        }
     }
 
     // Handle module-specific responses
     auto module = GetModule(sourceAddress);
     if (!module) {
-        printf("Received packet from unknown module address %d\\n", sourceAddress);
+        printf("Received packet from unknown module address %d\n", sourceAddress);
+        CheckSendStateAdvance();
         return;
     }
 
@@ -374,7 +452,7 @@ void LynxUsbDevice::HandlePayload(std::span<const uint8_t> data, uint8_t crc) {
             break;
         case MESSAGE_BULK_INPUT: {
             haveBulk = true;
-            
+
             if (module->HasMotors() && payload.size() >= 26) {
                 module->GetMotor(0).SetEncoder(ReadInt32(payload.subspan(1)), ReadInt16(payload.subspan(18)));
                 module->GetMotor(1).SetEncoder(ReadInt32(payload.subspan(5)), ReadInt16(payload.subspan(20)));
@@ -393,14 +471,36 @@ void LynxUsbDevice::HandlePayload(std::span<const uint8_t> data, uint8_t crc) {
         default:
             break;
     }
+
+    CheckSendStateAdvance();
+}
+
+void LynxUsbDevice::CheckSendStateAdvance() {
+    if (pendingWrites.empty() && outstandingMessages == 0) {
+        sendState = SendState::ReadyToSend;
+    }
 }
 
 void LynxUsbDevice::Recover() {
+    printf("Recover: outstanding=%d pending=%zu sendState=%d\n",
+           outstandingMessages, pendingWrites.size(), static_cast<int>(sendState));
+    auto now = wpi::Now();
+    printf("Recover: %zu unanswered sends (totalSent=%lu totalReceived=%lu diff=%ld):\n",
+           pendingSends.size(), (unsigned long)totalSent,
+           (unsigned long)totalReceived,
+           (long)totalSent - (long)totalReceived);
+    for (auto& p : pendingSends) {
+        printf("  unanswered: dest=%d msgNum=%d packetTypeId=0x%04X age_ms=%lu\n",
+               p.dest, p.msgNum, p.packetTypeId,
+               (unsigned long)((now - p.sentAt) / 1000));
+    }
+    pendingSends.clear();
     stateMachine.Reset();
     outstandingMessages = 0;
     writeBuffer.clear();
     pendingWrites.clear();
     currentCount = 0;
+    sendState = SendState::ReadyToSend;
 }
 
 // Communication method implementations
