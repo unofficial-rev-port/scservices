@@ -1,7 +1,7 @@
 #pragma once
 
-#include "wpinet/uv/Loop.h"
-#include "wpinet/uv/Poll.h"
+#include "wpi/net/uv/Loop.hpp"
+#include "wpi/net/uv/Poll.hpp"
 #include "functional"
 #include "LynxModuleNtState.h"
 #include "MessageNumbers.h"
@@ -33,9 +33,9 @@ class LynxUsbDevice {
     LynxUsbDevice() = default;
     ~LynxUsbDevice() noexcept;
 
-    bool Initialize(wpi::uv::Loop& loop, int fd, std::string path, int busId, bool isUart = false);
+    bool Initialize(wpi::net::uv::Loop& loop, int fd, std::string path, int busId, bool isUart = false);
 
-    void SetNtInstance(const nt::NetworkTableInstance* instance) { ntInstance = instance; }
+    void SetNtInstance(const wpi::nt::NetworkTableInstance* instance) { ntInstance = instance; }
 
     void RunDiscoverySteps();
     bool HasFinishedInitialization() const { return deviceState == DeviceState::Ready; }
@@ -75,7 +75,7 @@ class LynxUsbDevice {
     void SendI2CBlockReadConfig(uint8_t moduleAddress, uint8_t channel, uint8_t deviceAddress, uint8_t startRegister, uint8_t numBytes, uint8_t interval);
 
    private:
-    const nt::NetworkTableInstance* ntInstance{nullptr};
+    const wpi::nt::NetworkTableInstance* ntInstance{nullptr};
     int busId{0};
     
     std::vector<std::unique_ptr<LynxModuleNtState>> modules;
@@ -101,7 +101,7 @@ class LynxUsbDevice {
 
     uint8_t readBuf[256];
     int serialFd{-1};
-    std::weak_ptr<wpi::uv::Poll> serialPoll;
+    std::weak_ptr<wpi::net::uv::Poll> serialPoll;
     eh::ReceiveStateMachine stateMachine{
         [this](auto data, auto crc) { HandlePayload(data, crc); }};
 

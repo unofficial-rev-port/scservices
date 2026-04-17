@@ -2,7 +2,7 @@
 
 #include "stdio.h"
 
-#include "wpi/timestamp.h"
+#include "wpi/util/timestamp.hpp"
 
 #define MAX_NUM_OUTSTANDING_MESSAGES 8
 
@@ -94,12 +94,12 @@ static constexpr uint8_t CalcChecksum(std::span<const uint8_t> buffer) {
     return sum;
 }
 
-bool ExpansionHubSerial::Initialize(wpi::uv::Loop& loop, int fd, std::string path) {
+bool ExpansionHubSerial::Initialize(wpi::net::uv::Loop& loop, int fd, std::string path) {
     serialFd = fd;
     serialPath = std::move(path);
     tcflush(serialFd, TCIFLUSH);
 
-    auto poll = wpi::uv::Poll::Create(loop, serialFd);
+    auto poll = wpi::net::uv::Poll::Create(loop, serialFd);
     if (!poll) {
         return false;
     }
@@ -121,7 +121,7 @@ void ExpansionHubSerial::SetCallbacks(std::function<void(bool, bool)> doOnSendCo
 }
 
 void ExpansionHubSerial::RunDiscoverInternal() {
-    auto now = wpi::Now();
+    auto now = wpi::util::Now();
     auto delta = now - discoverStartTime;
 
     // Don't try again
@@ -135,7 +135,7 @@ void ExpansionHubSerial::RunDiscoverInternal() {
 }
 
 void ExpansionHubSerial::RunInterfacePacketIdInternal() {
-    auto now = wpi::Now();
+    auto now = wpi::util::Now();
     auto delta = now - discoverStartTime;
 
     // Don't try again
@@ -155,7 +155,7 @@ void ExpansionHubSerial::RunInterfacePacketIdInternal() {
 }
 
 void ExpansionHubSerial::RunFtdiConfigureInternal() {
-    auto now = wpi::Now();
+    auto now = wpi::util::Now();
     auto delta = now - discoverStartTime;
 
     // Don't try again
@@ -350,7 +350,7 @@ bool ExpansionHubSerial::AllowSend() {
 void ExpansionHubSerial::StartTransaction(bool canDoEnable) {
     writeBuffer.clear();
     currentCount = 0;
-    lastLoop = wpi::Now();
+    lastLoop = wpi::util::Now();
     canEnable = canDoEnable;
     haveBattery = false;
     haveBulk = false;
@@ -393,7 +393,7 @@ void ExpansionHubSerial::CheckForStateAdvance(MessageNumbers messageNumber, size
             printf("Commands did not occur this loop\n");
         }
         // Done ready to send
-        auto delta = wpi::Now() - lastLoop;
+        auto delta = wpi::util::Now() - lastLoop;
         ntStore->transactionTimePublisher.Set(delta);
         sendState = SendState::ReadyToSend;
     }
@@ -464,7 +464,8 @@ void ExpansionHubSerial::HandlePayload(std::span<const uint8_t> data, uint8_t cr
     switch (packetReferenceNumber) {
         case MESSAGE_MODULE_STATUS:
             haveModuleStatus = true;
-            deviceReset = (payload[0] & 0x01) != 0;
+            // A device reset should be triggered if anything is set
+            deviceReset = payload[0] != 0;
 
             break;
         case MESSAGE_MOTOR_RESET_ENCODER_0: {

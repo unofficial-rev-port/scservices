@@ -12,37 +12,36 @@
 
 #include <filesystem>
 
-#include <wpinet/EventLoopRunner.h>
-#include <wpinet/uv/Poll.h>
-#include <wpinet/uv/FsEvent.h>
-#include <wpinet/uv/Timer.h>
+#include <wpi/net/EventLoopRunner.hpp>
+#include <wpi/net/uv/Poll.hpp>
+#include <wpi/net/uv/FsEvent.hpp>
+#include <wpi/net/uv/Timer.hpp>
 
-#include "networktables/NetworkTableInstance.h"
-#include "networktables/RawTopic.h"
+#include "wpi/nt/NetworkTableInstance.hpp"
+#include "wpi/nt/RawTopic.hpp"
 
-#include "networktables/IntegerTopic.h"
-#include "networktables/DoubleTopic.h"
-
+#include "wpi/nt/IntegerTopic.hpp"
+#include "wpi/nt/DoubleTopic.hpp"
 #include "systemd/sd-device.h"
 
 #include "SerialPort.h"
 
 #include <deque>
 
-#include "networktables/BooleanTopic.h"
+#include "wpi/nt/BooleanTopic.hpp"
 
-#include <wpi/timestamp.h>
+#include <wpi/util/timestamp.hpp>
 
 #include "ReceiveStateMachine.h"
 #include "MessageNumbers.h"
 
-#include "frc/controller/PIDController.h"
-#include "frc/controller/SimpleMotorFeedforward.h"
+#include "wpi/math/controller/PIDController.hpp"
+#include "wpi/math/controller/SimpleMotorFeedforward.hpp"
 
-#include <units/length.h>
-#include <units/velocity.h>
-#include <units/voltage.h>
-#include <units/acceleration.h>
+#include <wpi/units/length.hpp>
+#include <wpi/units/velocity.hpp>
+#include <wpi/units/voltage.hpp>
+#include <wpi/units/acceleration.hpp>
 
 #include "ExpansionHubNtState.h"
 #include "ExpansionHubSerial.h"
@@ -50,13 +49,13 @@
 #include "SystemDUsbMonitor.h"
 
 struct ExpansionHubState {
-    uint64_t lastLoop = wpi::Now();
+    uint64_t lastLoop = wpi::util::Now();
 
     int socketHandle{-1};
 
     eh::ExpansionHubNtState ntStore;
 
-    const nt::NetworkTableInstance* ntInstance;
+    const wpi::nt::NetworkTableInstance* ntInstance;
 
     unsigned busId{0};
 
@@ -74,8 +73,8 @@ struct ExpansionHubState {
 
     void SendCommands(bool canEnable, bool deviceReset);
 
-    bool StartUvLoop(unsigned bus, const nt::NetworkTableInstance& ntInst,
-                     wpi::uv::Loop& loop);
+    bool StartUvLoop(unsigned bus, const wpi::nt::NetworkTableInstance& ntInst,
+                     wpi::net::uv::Loop& loop);
 
     void OnDeviceAdded(std::unique_ptr<eh::ExpansionHubSerial> hub);
 
@@ -129,10 +128,25 @@ void ExpansionHubState::SendCommands(bool canEnable, bool deviceReset) {
         }
     }
 
-    // First the 4 motors.
+    // Compute motor powers
+    std::pair<double, int> motorPowers[NUM_MOTORS_PER_HUB];
     for (int i = 0; i < NUM_MOTORS_PER_HUB; i++) {
-        currentHub->SendMotorConstantPower(
-            i, ntStore.motors[i].ComputeMotorPower(ntStore.lastBattery));
+        motorPowers[i] =
+            ntStore.motors[i].ComputeMotorPower(ntStore.lastBattery);
+    }
+
+    // Then send the 4 motors.
+    for (int i = 0; i < NUM_MOTORS_PER_HUB; i++) {
+        if (motorPowers[i].second < 0) {
+            currentHub->SendMotorConstantPower(i, motorPowers[i].first);
+        } else if (motorPowers[i].second < 4) {
+            // TODO, determine if a follower is following a follower, and what
+            // to do
+            currentHub->SendMotorConstantPower(
+                i, motorPowers[motorPowers[i].second].first);
+        } else {
+            currentHub->SendMotorConstantPower(i, 0.0);
+        }
     }
 
     // Then get the motor currents
@@ -175,7 +189,8 @@ void ExpansionHubState::SendCommands(bool canEnable, bool deviceReset) {
     currentHub->Flush();
 }
 
-void ExpansionHubState::OnDeviceAdded(std::unique_ptr<eh::ExpansionHubSerial> hub) {
+void ExpansionHubState::OnDeviceAdded(
+    std::unique_ptr<eh::ExpansionHubSerial> hub) {
     currentHub = std::move(hub);
 
     ntStore.Initialize(*ntInstance, busId);
@@ -225,7 +240,7 @@ void ExpansionHubState::OnUpdate(bool canEnable) {
         return;
     }
 
-    auto now = wpi::Now();
+    auto now = wpi::util::Now();
     auto delta = now - lastLoop;
 
     bool allowSend = currentHub->AllowSend();
@@ -261,7 +276,7 @@ static void OnDeviceRemoved(
     }
 }
 
-static void OnDeviceAdded(wpi::uv::Loop& loop,
+static void OnDeviceAdded(wpi::net::uv::Loop& loop,
                           std::array<ExpansionHubState, NUM_USB_BUSES>& states,
                           int busNum, const std::string& devPath) {
     if (states[busNum].currentHub != nullptr) {
@@ -275,7 +290,8 @@ static void OnDeviceAdded(wpi::uv::Loop& loop,
         return;
     }
 
-    std::unique_ptr<eh::ExpansionHubSerial> sl = std::make_unique<eh::ExpansionHubSerial>();
+    std::unique_ptr<eh::ExpansionHubSerial> sl =
+        std::make_unique<eh::ExpansionHubSerial>();
     bool isInit = sl->Initialize(loop, ret, devPath);
     printf("initialized %d\n", isInit ? 1 : 0);
 
@@ -285,8 +301,8 @@ static void OnDeviceAdded(wpi::uv::Loop& loop,
 }
 
 bool ExpansionHubState::StartUvLoop(unsigned bus,
-                                    const nt::NetworkTableInstance& ntInst,
-                                    wpi::uv::Loop& loop) {
+                                    const wpi::nt::NetworkTableInstance& ntInst,
+                                    wpi::net::uv::Loop& loop) {
     if (bus >= NUM_USB_BUSES) {
         return false;
     }
@@ -319,30 +335,31 @@ int main() {
 
     std::array<ExpansionHubState, NUM_USB_BUSES> states;
     eh::SystemDUsbMonitor usbMonitor{
-        [&states](wpi::uv::Loop& loop, int busNum, const std::string& devPath) {
+        [&states](wpi::net::uv::Loop& loop, int busNum,
+                  const std::string& devPath) {
             OnDeviceAdded(loop, states, busNum, devPath);
         },
         [&states](const std::string& devPath) {
             OnDeviceRemoved(states, devPath);
         }};
 
-    auto ntInst = nt::NetworkTableInstance::Create();
+    auto ntInst = wpi::nt::NetworkTableInstance::Create();
     ntInst.SetServer({"localhost"}, 6810);
     ntInst.StartClient("ExpansionHubDaemon");
 
-    wpi::EventLoopRunner loopRunner;
+    wpi::net::EventLoopRunner loopRunner;
 
     struct LoopStorage {
         std::array<ExpansionHubState, NUM_USB_BUSES>* hubStates;
-        wpi::uv::Loop* loop;
+        wpi::net::uv::Loop* loop;
     } loopStorage{
         .hubStates = &states,
         .loop = nullptr,
     };
 
     bool success = false;
-    loopRunner.ExecSync([&success, &states, &loopStorage, &ntInst,
-                         &usbMonitor, &enabledState](wpi::uv::Loop& loop) {
+    loopRunner.ExecSync([&success, &states, &loopStorage, &ntInst, &usbMonitor,
+                         &enabledState](wpi::net::uv::Loop& loop) {
         loopStorage.loop = &loop;
         for (size_t i = 0; i < states.size(); i++) {
             success = states[i].StartUvLoop(i, ntInst, loop);
@@ -358,7 +375,7 @@ int main() {
             return;
         }
 
-        auto poll = wpi::uv::Poll::Create(loop, usbMonitor.GetFd());
+        auto poll = wpi::net::uv::Poll::Create(loop, usbMonitor.GetFd());
         if (!poll) {
             printf("Poll create failed\n");
             success = false;
@@ -370,7 +387,7 @@ int main() {
 
         poll->Start(UV_READABLE);
 
-        auto sendTimer = wpi::uv::Timer::Create(loop);
+        auto sendTimer = wpi::net::uv::Timer::Create(loop);
 
         sendTimer->timeout.connect([&states, &enabledState]() {
             bool system_watchdog = enabledState.IsEnabled();
@@ -380,11 +397,11 @@ int main() {
             }
         });
 
-        units::millisecond_t millis = eh::PidConstants::Period;
+        wpi::units::millisecond_t millis = eh::PidConstants::Period;
         uint64_t rawMillis = static_cast<uint64_t>(millis.value());
 
-        sendTimer->Start(wpi::uv::Timer::Time{rawMillis},
-                         wpi::uv::Timer::Time{rawMillis});
+        sendTimer->Start(wpi::net::uv::Timer::Time{rawMillis},
+                         wpi::net::uv::Timer::Time{rawMillis});
 
         // Enumerate everything for initial checking
 
@@ -405,7 +422,7 @@ int main() {
 #endif
     }
     ntInst.StopClient();
-    nt::NetworkTableInstance::Destroy(ntInst);
+    wpi::nt::NetworkTableInstance::Destroy(ntInst);
 
     loopRunner.Stop();
 

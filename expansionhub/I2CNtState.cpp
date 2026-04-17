@@ -4,7 +4,7 @@
 
 namespace eh {
 
-void I2CChannelState::Initialize(const nt::NetworkTableInstance& instance, int busId, int moduleAddress, int channel) {
+void I2CChannelState::Initialize(const wpi::nt::NetworkTableInstance& instance, int busId, int moduleAddress, int channel) {
     std::string baseTopicName = "/ExpansionHub/" + std::to_string(busId) + "/Module_" + std::to_string(moduleAddress) + "/I2C_" + std::to_string(channel);
 
     auto configTable = instance.GetTable(baseTopicName + "/Config");
@@ -19,7 +19,7 @@ void I2CChannelState::Initialize(const nt::NetworkTableInstance& instance, int b
     dataPublisher = statusTable->GetRawTopic("Data").Publish("raw");
 }
 
-void I2CNtState::Initialize(const nt::NetworkTableInstance& instance, int busId, int moduleAddress) {
+void I2CNtState::Initialize(const wpi::nt::NetworkTableInstance& instance, int busId, int moduleAddress) {
     for (int i = 0; i < NUM_I2C_CHANNELS; i++) {
         channels[i].Initialize(instance, busId, moduleAddress, i);
     }

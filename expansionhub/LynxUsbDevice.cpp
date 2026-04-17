@@ -1,7 +1,7 @@
 #include "LynxUsbDevice.h"
 
 #include "stdio.h"
-#include "wpi/timestamp.h"
+#include <wpi/util/timestamp.hpp>
 #include <algorithm>
 #include <set>
 #include <unistd.h>
@@ -100,14 +100,14 @@ static constexpr uint8_t CalcChecksum(std::span<const uint8_t> buffer) {
     return sum;
 }
 
-bool LynxUsbDevice::Initialize(wpi::uv::Loop& loop, int fd, std::string path, int busId, bool isUart) {
+bool LynxUsbDevice::Initialize(wpi::net::uv::Loop& loop, int fd, std::string path, int busId, bool isUart) {
     serialFd = fd;
     serialPath = std::move(path);
     this->busId = busId;
     this->isUartConnection = isUart;
     tcflush(serialFd, TCIFLUSH);
 
-    auto poll = wpi::uv::Poll::Create(loop, serialFd);
+    auto poll = wpi::net::uv::Poll::Create(loop, serialFd);
     if (!poll) {
         return false;
     }
@@ -166,7 +166,7 @@ LynxModuleNtState* LynxUsbDevice::GetModule(uint8_t address) {
 }
 
 void LynxUsbDevice::RunDiscoverInternal() {
-    auto now = wpi::Now();
+    auto now = wpi::util::Now();
     auto delta = now - discoverStartTime;
 
     // If we've found at least one module, use a shorter timeout (500ms) before proceeding
@@ -186,7 +186,7 @@ void LynxUsbDevice::RunDiscoverInternal() {
 }
 
 void LynxUsbDevice::RunInterfacePacketIdInternal() {
-    auto now = wpi::Now();
+    auto now = wpi::util::Now();
     auto delta = now - discoverStartTime;
 
     if (delta <= MESSAGE_TIMEOUT) {
@@ -209,7 +209,7 @@ void LynxUsbDevice::RunInterfacePacketIdInternal() {
 }
 
 void LynxUsbDevice::RunFtdiConfigureInternal() {
-    auto now = wpi::Now();
+    auto now = wpi::util::Now();
     auto delta = now - discoverStartTime;
 
     if (delta <= MESSAGE_TIMEOUT) {
@@ -286,7 +286,7 @@ void LynxUsbDevice::SendPacket(uint8_t destAddr, uint8_t messageNumber, uint16_t
                            txBufferSpan.end());
         pendingWrites.emplace_back(txBufferSpan.size());
         pendingSends.push_back(
-            {wpi::Now(), destAddr, messageNumber, packetTypeId});
+            {wpi::util::Now(), destAddr, messageNumber, packetTypeId});
         totalSent++;
     }
 }
@@ -322,7 +322,7 @@ void LynxUsbDevice::StartTransaction(bool canDoEnable) {
     writeBuffer.clear();
     pendingWrites.clear();
     currentCount = 0;
-    lastLoop = wpi::Now();
+    lastLoop = wpi::util::Now();
     canEnable = canDoEnable;
     haveBattery = false;
     haveBulk = false;
@@ -399,7 +399,7 @@ void LynxUsbDevice::HandlePayload(std::span<const uint8_t> data, uint8_t crc) {
             // After first response, use a shorter timeout to wait for more modules.
             if (!discoveryComplete) {
                 discoveryComplete = true;
-                discoverStartTime = wpi::Now();
+                discoverStartTime = wpi::util::Now();
             }
         }
         return;
@@ -484,7 +484,7 @@ void LynxUsbDevice::CheckSendStateAdvance() {
 void LynxUsbDevice::Recover() {
     printf("Recover: outstanding=%d pending=%zu sendState=%d\n",
            outstandingMessages, pendingWrites.size(), static_cast<int>(sendState));
-    auto now = wpi::Now();
+    auto now = wpi::util::Now();
     printf("Recover: %zu unanswered sends (totalSent=%lu totalReceived=%lu diff=%ld):\n",
            pendingSends.size(), (unsigned long)totalSent,
            (unsigned long)totalReceived,

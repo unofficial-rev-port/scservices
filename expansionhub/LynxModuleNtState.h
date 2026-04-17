@@ -23,22 +23,22 @@ struct LynxModuleNtState {
     
     // Module status
     double lastBattery{0};
-    nt::DoublePublisher batteryVoltagePublisher;
-    nt::BooleanPublisher isConnectedPublisher;
-    nt::IntegerPublisher moduleTypePublisher;
-    nt::IntegerPublisher parentAddressPublisher;
-    
+    wpi::nt::DoublePublisher batteryVoltagePublisher;
+    wpi::nt::BooleanPublisher isConnectedPublisher;
+    wpi::nt::IntegerPublisher moduleTypePublisher;
+    wpi::nt::IntegerPublisher parentAddressPublisher;
+
     // Error tracking
-    nt::IntegerPublisher numNacksPublisher;
-    nt::IntegerPublisher numCrcFailuresPublisher;
-    nt::IntegerPublisher numMissedSendLoopsPublisher;
-    nt::IntegerPublisher transactionTimePublisher;
+    wpi::nt::IntegerPublisher numNacksPublisher;
+    wpi::nt::IntegerPublisher numCrcFailuresPublisher;
+    wpi::nt::IntegerPublisher numMissedSendLoopsPublisher;
+    wpi::nt::IntegerPublisher transactionTimePublisher;
     
     uint64_t numNacks{0};
     uint64_t numCrcFailures{0};
     uint64_t numMissedSendLoops{0};
     
-    void Initialize(const nt::NetworkTableInstance& instance, int busId, const LynxModuleInfo& info);
+    void Initialize(const wpi::nt::NetworkTableInstance& instance, int busId, const LynxModuleInfo& info);
     void SetModuleType(LynxModuleType type);
     
     bool HasMotors() const { return motors != nullptr; }

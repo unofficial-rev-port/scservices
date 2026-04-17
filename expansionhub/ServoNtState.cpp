@@ -1,12 +1,12 @@
 #include "ServoNtState.h"
 
-#include "networktables/NetworkTableInstance.h"
+#include "wpi/nt/NetworkTableInstance.hpp"
 
 using namespace eh;
 
-void ServoNtState::Initialize(const nt::NetworkTableInstance& instance,
+void ServoNtState::Initialize(const wpi::nt::NetworkTableInstance& instance,
                             int servoNum, const std::string& busIdStr,
-                            nt::PubSubOptions options) {
+                            wpi::nt::PubSubOptions options) {
     auto servoNumStr = std::to_string(servoNum);
     enabledSubscriber = instance
                             .GetBooleanTopic("/rhsp/" + busIdStr + "/servo" +
@@ -23,8 +23,8 @@ void ServoNtState::Initialize(const nt::NetworkTableInstance& instance,
                                .Subscribe(1500, options);
 }
 
-void ServoNtState::Initialize(const nt::NetworkTableInstance& instance, int busId, int moduleAddress, int servoNum) {
-    nt::PubSubOptions options;
+void ServoNtState::Initialize(const wpi::nt::NetworkTableInstance& instance, int busId, int moduleAddress, int servoNum) {
+    wpi::nt::PubSubOptions options;
     options.pollStorage = 10;
     options.periodic = 0.0;
     

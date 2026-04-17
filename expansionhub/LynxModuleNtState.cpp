@@ -4,7 +4,7 @@
 
 namespace eh {
 
-void LynxModuleNtState::Initialize(const nt::NetworkTableInstance& instance, int busId, const LynxModuleInfo& info) {
+void LynxModuleNtState::Initialize(const wpi::nt::NetworkTableInstance& instance, int busId, const LynxModuleInfo& info) {
     moduleInfo = info;
     
     std::string baseTopicName = "/ExpansionHub/" + std::to_string(busId) + "/Module_" + std::to_string(moduleInfo.address);

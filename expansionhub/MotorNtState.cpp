@@ -1,11 +1,12 @@
 #include "MotorNtState.h"
 
-#include "networktables/NetworkTableInstance.h"
+#include "wpi/nt/NetworkTableInstance.hpp"
 
 #define PERCENTAGE_MODE 0
 #define VOLTAGE_MODE 1
 #define POSITION_PID_MODE 2
 #define VELOCITY_PID_MODE 3
+#define FOLLOWER_MODE 4
 
 using namespace eh;
 
@@ -23,36 +24,39 @@ void MotorNtState::SetEncoder(double positionRaw, double velocityRaw) {
     velocityPublisher.Set(lastEncoderVelocity);
 }
 
-double MotorNtState::ComputeMotorPower(double batteryVoltage) {
+std::pair<double, int> MotorNtState::ComputeMotorPower(double batteryVoltage) {
     double reversed = reversedSubscriber.Get(false) ? -1.0 : 1.0;
     if (batteryVoltage == 0) {
-        return 0;
+        return {0.0, -1};
     }
     double setpoint = setpointSubscriber.Get(0);
     switch (modeSubscriber.Get(PERCENTAGE_MODE)) {
         case VOLTAGE_MODE:
-            return (setpoint / batteryVoltage) * reversed;
+            return {(setpoint / batteryVoltage) * reversed, -1};
 
         case POSITION_PID_MODE:
-            return (positionPid.ComputePosition(setpoint, lastEncoderPosition,
-                                                lastEncoderVelocity) /
-                    batteryVoltage) *
-                   reversed;
+            return {(positionPid.Compute(setpoint, lastEncoderPosition) /
+                     batteryVoltage) *
+                        reversed,
+                    -1};
 
         case VELOCITY_PID_MODE:
-            return (velocityPid.ComputeVelocity(setpoint, lastEncoderPosition,
-                                                lastEncoderVelocity) /
-                    batteryVoltage) *
-                   reversed;
+            return {(velocityPid.Compute(setpoint, lastEncoderVelocity) /
+                     batteryVoltage) *
+                        reversed,
+                    -1};
+
+        case FOLLOWER_MODE:
+            return {0.0, static_cast<int>(setpoint)};
 
         default:
-            return setpoint * reversed;
+            return {setpoint * reversed, -1};
     }
 }
 
-void MotorNtState::Initialize(const nt::NetworkTableInstance& instance,
-                            int motorNum, const std::string& busIdStr,
-                            nt::PubSubOptions options) {
+void MotorNtState::Initialize(const wpi::nt::NetworkTableInstance& instance,
+                              int motorNum, const std::string& busIdStr,
+                              wpi::nt::PubSubOptions options) {
     auto motorNumStr = std::to_string(motorNum);
     encoderPublisher = instance
                            .GetDoubleTopic("/rhsp/" + busIdStr + "/motor" +
@@ -107,8 +111,8 @@ void MotorNtState::Initialize(const nt::NetworkTableInstance& instance,
                            options);
 }
 
-void MotorNtState::Initialize(const nt::NetworkTableInstance& instance, int busId, int moduleAddress, int motorNum) {
-    nt::PubSubOptions options;
+void MotorNtState::Initialize(const wpi::nt::NetworkTableInstance& instance, int busId, int moduleAddress, int motorNum) {
+    wpi::nt::PubSubOptions options;
     options.pollStorage = 10;
     options.periodic = 0.0;
     

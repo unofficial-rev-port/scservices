@@ -1,10 +1,10 @@
 #pragma once
 
-#include "networktables/NetworkTableInstance.h"
-#include "networktables/RawTopic.h"
-#include "networktables/IntegerTopic.h"
-#include "networktables/DoubleTopic.h"
-#include "networktables/BooleanTopic.h"
+#include "wpi/nt/NetworkTableInstance.hpp"
+#include "wpi/nt/RawTopic.hpp"
+#include "wpi/nt/IntegerTopic.hpp"
+#include "wpi/nt/DoubleTopic.hpp"
+#include "wpi/nt/BooleanTopic.hpp"
 
 #include "CachedCommand.h"
 
@@ -14,28 +14,28 @@ namespace eh {
 
 struct I2CChannelState {
     // Configuration
-    CachedCommand<nt::IntegerSubscriber> speedCodeSubscriber;
+    CachedCommand<wpi::nt::IntegerSubscriber> speedCodeSubscriber;
 
     // Status
-    nt::IntegerPublisher statusPublisher;
-    nt::RawPublisher dataPublisher;
+    wpi::nt::IntegerPublisher statusPublisher;
+    wpi::nt::RawPublisher dataPublisher;
 
     // Block read configuration
-    CachedCommand<nt::IntegerSubscriber> blockReadAddressSubscriber;
-    CachedCommand<nt::IntegerSubscriber> blockReadRegisterSubscriber;
-    CachedCommand<nt::IntegerSubscriber> blockReadBytesSubscriber;
-    CachedCommand<nt::IntegerSubscriber> blockReadIntervalSubscriber;
-    
+    CachedCommand<wpi::nt::IntegerSubscriber> blockReadAddressSubscriber;
+    CachedCommand<wpi::nt::IntegerSubscriber> blockReadRegisterSubscriber;
+    CachedCommand<wpi::nt::IntegerSubscriber> blockReadBytesSubscriber;
+    CachedCommand<wpi::nt::IntegerSubscriber> blockReadIntervalSubscriber;
+
     uint8_t lastStatus{0};
     std::vector<uint8_t> lastData;
-    
-    void Initialize(const nt::NetworkTableInstance& instance, int busId, int moduleAddress, int channel);
+
+    void Initialize(const wpi::nt::NetworkTableInstance& instance, int busId, int moduleAddress, int channel);
 };
 
 struct I2CNtState {
     std::array<I2CChannelState, NUM_I2C_CHANNELS> channels;
-    
-    void Initialize(const nt::NetworkTableInstance& instance, int busId, int moduleAddress);
+
+    void Initialize(const wpi::nt::NetworkTableInstance& instance, int busId, int moduleAddress);
 };
 
 } // namespace eh
